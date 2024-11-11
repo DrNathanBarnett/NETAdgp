@@ -1,0 +1,87 @@
+# Load necessary libraries for Seurat analysis and downstream pathway mapping
+library(Seurat)       # For single-cell RNA-seq analysis
+library(gprofiler2)   # For GO term enrichment
+library(STRINGdb)     # For protein-protein interaction analysis
+library(dplyr)        # For data manipulation
+library(tidyr)        # For separating metadata columns
+library(clustermole)  # For automated cell type annotation based on markers
+
+NETA_scRNAseq <- function(seurat_object, p_value_cutoff = 0.05) {
+  # Step 1: Quality Control on Seurat Object
+  seurat_object <- seurat_object %>%
+    AddMetaData(metadata = rownames(seurat_object@meta.data), col.name = "sample") %>%
+    separate(col = 'sample', into = c('Patient', 'Barcode', 'Tissue'), sep = '_') %>%
+    mutate(mitoPercent = PercentageFeatureSet(., pattern = '^MT-')) %>%
+    subset(subset = nCount_RNA > 800 & nFeature_RNA > 500 & mitoPercent < 10)
+  
+  # Step 2: Standard Workflow in Seurat for Batch Effect Detection
+  seurat_object <- seurat_object %>%
+    NormalizeData() %>%
+    FindVariableFeatures() %>%
+    ScaleData() %>%
+    RunPCA() %>%
+    FindNeighbors(dims = 1:20) %>%
+    FindClusters() %>%
+    RunUMAP(dims = 1:20)
+  
+  ElbowPlot(seurat_object)
+  
+  # Step 3: Find Differentially Expressed Genes (DEGs) per Cluster
+  cluster_markers <- FindAllMarkers(seurat_object, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+  top_markers <- cluster_markers %>% group_by(cluster) %>% slice_max(n = 2, order_by = avg_log2FC)
+  
+  # Step 4: Annotate Clusters with Clustermole
+  cluster_annotations <- clustermole(cluster_markers)
+  
+  # Step 5: Extract Gene List for GO and PPI Mapping
+  gene_list <- unique(cluster_markers$gene)
+  
+  # Step 6: Map DEGs to GO Terms and Create a GO Term Binary Matrix
+  map_genes_to_go <- function(gene_list) {
+    go_results <- gost(query = gene_list, organism = "hsapiens", sources = c("GO:BP", "GO:CC", "GO:MF"))
+    
+    if (is.null(go_results)) {
+      return(NULL)
+    }
+    
+    go_terms <- unique(go_results$result$term_name)
+    go_matrix <- sapply(go_terms, function(go_term) as.integer(go_results$result$term_name == go_term))
+    rownames(go_matrix) <- go_results$result$query
+    
+    return(list(go_mappings = go_results$result, go_matrix = go_matrix))
+  }
+  
+  go_results <- map_genes_to_go(gene_list)
+  
+  # Step 7: Find Protein-Protein Interactions (PPIs) Using STRINGdb
+  find_ppi <- function(gene_list) {
+    string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400, input_directory = "")
+    mapped_genes <- string_db$map(data.frame(gene_list), "gene_list", removeUnmappedRows = TRUE)
+    
+    if (is.null(mapped_genes) || nrow(mapped_genes) == 0) {
+      return(NULL)
+    }
+    
+    ppi_network <- string_db$get_interactions(mapped_genes$STRING_id)
+    return(ppi_network)
+  }
+  
+  ppi_results <- find_ppi(gene_list)
+  
+  # Step 8: Return Results
+  return(list(cluster_markers = cluster_markers, 
+              top_markers = top_markers, 
+              cluster_annotations = cluster_annotations, 
+              go_results = go_results, 
+              ppi_results = ppi_results))
+}
+
+# Example Usage:
+# Assuming 'seurat_object' is your Seurat object loaded with single-cell RNA-seq data
+# results <- NETA_scRNAseq(seurat_object)
+
+# View results:
+# head(results$cluster_markers)
+# head(results$cluster_annotations)
+# head(results$go_results$go_mappings)
+# head(results$ppi_results)

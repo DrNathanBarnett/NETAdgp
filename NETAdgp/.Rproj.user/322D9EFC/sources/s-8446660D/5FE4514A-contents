@@ -1,0 +1,398 @@
+NETA_dgpRNAseq <- function(count_data, phenotype, p_value_cutoff = 0.05) {
+  
+  if (!is.factor(phenotype)) {
+    phenotype <- factor(phenotype)
+  }
+  
+  if (length(phenotype) != ncol(count_data)) {
+    stop("The length of 'phenotype' must match the number of columns in 'count_data'.")
+  } 
+  
+  count_dataDGE <- DGEList(counts = count_data, group = phenotype)
+  
+  count_dataDGE <- calcNormFactors(count_dataDGE)
+  
+  count_dataDGE <- estimateDisp(count_dataDGE)
+  fit <- glmFit(count_dataDGE)
+  lrt <- glmLRT(fit)
+
+  Top_table <- topTags(lrt, n = Inf)
+  degs <- Top_table$table
+
+  significant_degs <- degs[degs$PValue < p_value_cutoff, ]
+  gene_list <- rownames(significant_degs)
+  map_genes_to_go <- function(gene_list) {
+    go_results <- gost(query = gene_list, 
+                       organism = "hsapiens", 
+                       sources = c("GO:BP", "GO:CC", "GO:MF"))
+    
+    go_terms <- unique(go_results$result$term_name)
+    go_matrix <- sapply(go_terms, function(go_term) as.integer(go_results$result$term_name == go_term))
+    rownames(go_matrix) <- go_results$result$query
+    return(list(go_mappings = go_results$result, go_matrix = go_matrix))
+  }
+    go_results <- map_genes_to_go(gene_list)
+    find_ppi <- function(gene_list) {
+    string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400, input_directory = "")
+    mapped_genes <- string_db$map(data.frame(gene_list), "gene_list", removeUnmappedRows = TRUE)
+    ppi_network <- string_db$get_interactions(mapped_genes$STRING_id)
+    return(ppi_network)
+  }
+  ppi_results <- find_ppi(gene_list)
+  return(list(degs = significant_degs, go_results = go_results, ppi_results = ppi_results))
+}
+
+
+
+
+
+NETA_dgpOligo <- function(oligo_data, phenotype, p_value_cutoff = 0.05) {
+  
+  if (!is.factor(phenotype)) {
+    phenotype <- factor(phenotype)
+  }
+  
+  if (length(phenotype) != ncol(exprs(oligo_data))) {
+    stop("The length of 'phenotype' must match the number of samples in 'oligo_data'.")
+  }
+  
+  norm_data <- rma(oligo_data)  
+  exprs_data <- exprs(norm_data)  
+  
+  design <- model.matrix(~ phenotype)
+  fit <- lmFit(exprs_data, design)     
+  fit <- eBayes(fit)                   
+  top_table <- topTable(fit, number = Inf, adjust.method = "BH")
+  significant_degs <- top_table[top_table$adj.P.Val < p_value_cutoff, ]
+  
+  gene_list <- rownames(significant_degs)
+  
+  map_genes_to_go <- function(gene_list) {
+    go_results <- gost(query = gene_list, 
+                       organism = "hsapiens", 
+                       sources = c("GO:BP", "GO:CC", "GO:MF"))
+    
+    go_terms <- unique(go_results$result$term_name)
+    go_matrix <- sapply(go_terms, function(go_term) as.integer(go_results$result$term_name == go_term))
+    
+    rownames(go_matrix) <- go_results$result$query
+    
+    return(list(go_mappings = go_results$result, go_matrix = go_matrix))
+  }
+    go_results <- map_genes_to_go(gene_list)
+  
+  find_ppi <- function(gene_list) {
+    string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400, input_directory = "")
+    
+    mapped_genes <- string_db$map(data.frame(gene_list), "gene_list", removeUnmappedRows = TRUE)
+    
+    ppi_network <- string_db$get_interactions(mapped_genes$STRING_id)
+    
+    return(ppi_network)
+  }
+  
+  ppi_results <- find_ppi(gene_list)
+  return(list(degs = significant_degs, go_results = go_results, ppi_results = ppi_results))
+}
+
+
+
+
+
+
+
+
+NETA_dgpIlluminaTxt <- function(illumina_data_file, phenotype, p_value_cutoff = 0.05) {
+  
+  if (!is.factor(phenotype)) {
+    phenotype <- factor(phenotype)
+  }
+  
+  raw_data <- lumiR(illumina_data_file) 
+  
+  norm_data <- lumiExpresso(raw_data, bg.correct = TRUE, variance.stabilize = TRUE, normalize.param = list(method = "rsn"))
+  exprs_data <- exprs(norm_data)  
+  
+  design <- model.matrix(~ phenotype)  
+  fit <- lmFit(exprs_data, design)     
+  fit <- eBayes(fit)                   
+  
+  top_table <- topTable(fit, number = Inf, adjust.method = "BH")
+  significant_degs <- top_table[top_table$adj.P.Val < p_value_cutoff, ]
+  
+  gene_list <- rownames(significant_degs)
+  
+  map_genes_to_go <- function(gene_list) {
+    go_results <- gost(query = gene_list, 
+                       organism = "hsapiens", 
+                       sources = c("GO:BP", "GO:CC", "GO:MF"))
+    
+    go_terms <- unique(go_results$result$term_name)
+    go_matrix <- sapply(go_terms, function(go_term) as.integer(go_results$result$term_name == go_term))
+    
+    rownames(go_matrix) <- go_results$result$query
+    
+    return(list(go_mappings = go_results$result, go_matrix = go_matrix))
+  }
+  
+  go_results <- map_genes_to_go(gene_list)
+  
+  find_ppi <- function(gene_list) {
+    string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400, input_directory = "")
+    
+    mapped_genes <- string_db$map(data.frame(gene_list), "gene_list", removeUnmappedRows = TRUE)
+    
+    ppi_network <- string_db$get_interactions(mapped_genes$STRING_id)
+    
+    return(ppi_network)
+  }
+  
+  ppi_results <- find_ppi(gene_list)
+  
+  return(list(degs = significant_degs, go_results = go_results, ppi_results = ppi_results))
+}
+
+
+
+NETA_dgpIlluminaIDAT <- function(idat_file_paths, sample_info, phenotype, p_value_cutoff = 0.05) {
+  
+  if (!is.factor(phenotype)) {
+    phenotype <- factor(phenotype)
+  }
+  
+  raw_data_list <- lapply(idat_file_paths, readIDAT)
+  
+  raw_data_matrix <- do.call(cbind, lapply(raw_data_list, function(x) x$Quants[, "Mean"]))
+  colnames(raw_data_matrix) <- sample_info$Sample_Name  
+  
+  norm_data <- neqc(raw_data_matrix)  
+  
+  design <- model.matrix(~ phenotype)  
+  fit <- lmFit(norm_data, design)      
+  fit <- eBayes(fit)                   
+  
+  top_table <- topTable(fit, number = Inf, adjust.method = "BH")
+  significant_degs <- top_table[top_table$adj.P.Val < p_value_cutoff, ]
+  
+  gene_list <- rownames(significant_degs)
+  
+  map_genes_to_go <- function(gene_list) {
+    go_results <- gost(query = gene_list, 
+                       organism = "hsapiens", 
+                       sources = c("GO:BP", "GO:CC", "GO:MF"))
+    
+    go_terms <- unique(go_results$result$term_name)
+    go_matrix <- sapply(go_terms, function(go_term) as.integer(go_results$result$term_name == go_term))
+    
+    rownames(go_matrix) <- go_results$result$query
+    
+    return(list(go_mappings = go_results$result, go_matrix = go_matrix))
+  }
+  
+  go_results <- map_genes_to_go(gene_list)
+  
+  find_ppi <- function(gene_list) {
+    string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400, input_directory = "")
+    
+    mapped_genes <- string_db$map(data.frame(gene_list), "gene_list", removeUnmappedRows = TRUE)
+    
+    ppi_network <- string_db$get_interactions(mapped_genes$STRING_id)
+    
+    return(ppi_network)
+  }
+  
+  ppi_results <- find_ppi(gene_list)
+  
+  return(list(degs = significant_degs, go_results = go_results, ppi_results = ppi_results))
+}
+
+
+
+
+
+
+
+
+
+NETA_dgpAgilent <- function(targets_file, phenotype, p_value_cutoff = 0.05) {
+  
+  if (!is.factor(phenotype)) {
+    phenotype <- factor(phenotype)
+  }
+  
+  targets <- readTargets(targets_file)
+  
+  raw_data <- read.maimages(targets$FileName, source = "agilent", green.only = TRUE)
+  
+  bg_corrected_data <- backgroundCorrect(raw_data, method = "normexp", offset = 50)
+  
+  norm_data <- normalizeBetweenArrays(bg_corrected_data, method = "quantile")
+  
+  exprs_data <- norm_data$E
+  
+  design <- model.matrix(~ phenotype)  
+  fit <- lmFit(exprs_data, design)     
+  fit <- eBayes(fit)                   
+  
+  top_table <- topTable(fit, number = Inf, adjust.method = "BH")
+  significant_degs <- top_table[top_table$adj.P.Val < p_value_cutoff, ]
+  
+  gene_list <- rownames(significant_degs)
+  
+  map_genes_to_go <- function(gene_list) {
+    go_results <- gost(query = gene_list, 
+                       organism = "hsapiens", 
+                       sources = c("GO:BP", "GO:CC", "GO:MF"))
+    
+    go_terms <- unique(go_results$result$term_name)
+    go_matrix <- sapply(go_terms, function(go_term) as.integer(go_results$result$term_name == go_term))
+    
+    rownames(go_matrix) <- go_results$result$query
+    
+    return(list(go_mappings = go_results$result, go_matrix = go_matrix))
+  }
+  
+  go_results <- map_genes_to_go(gene_list)
+  
+  find_ppi <- function(gene_list) {
+    string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400, input_directory = "")
+    
+    mapped_genes <- string_db$map(data.frame(gene_list), "gene_list", removeUnmappedRows = TRUE)
+    
+    ppi_network <- string_db$get_interactions(mapped_genes$STRING_id)
+    
+    return(ppi_network)
+  }
+  
+  ppi_results <- find_ppi(gene_list)
+  
+  return(list(degs = significant_degs, go_results = go_results, ppi_results = ppi_results))
+}
+
+
+
+NETA_dgpAffy <- function(affy_batch, phenotype, p_value_cutoff = 0.05) {
+  
+  if (!is.factor(phenotype)) {
+    phenotype <- factor(phenotype)
+  }
+  
+  if (length(phenotype) != length(affy_batch)) {
+    stop("The length of 'phenotype' must match the number of samples in 'affy_batch'.")
+  }
+  
+  norm_data <- mas5(affy_batch)
+  exprs_data <- exprs(norm_data)  # Extract normalized expression values
+  
+  library(limma)  
+  
+  design <- model.matrix(~ phenotype)  
+  fit <- lmFit(exprs_data, design)    
+  fit <- eBayes(fit)                   
+  
+  top_table <- topTable(fit, number = Inf, adjust.method = "BH")
+  significant_degs <- top_table[top_table$adj.P.Val < p_value_cutoff, ]
+  
+  gene_list <- rownames(significant_degs)
+  
+  map_genes_to_go <- function(gene_list) {
+    go_results <- gost(query = gene_list, 
+                       organism = "hsapiens", 
+                       sources = c("GO:BP", "GO:CC", "GO:MF"))
+    
+    go_terms <- unique(go_results$result$term_name)
+    go_matrix <- sapply(go_terms, function(go_term) as.integer(go_results$result$term_name == go_term))
+    
+    rownames(go_matrix) <- go_results$result$query
+    
+    return(list(go_mappings = go_results$result, go_matrix = go_matrix))
+  }
+  
+  go_results <- map_genes_to_go(gene_list)
+  
+  find_ppi <- function(gene_list) {
+    string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400, input_directory = "")
+    
+    mapped_genes <- string_db$map(data.frame(gene_list), "gene_list", removeUnmappedRows = TRUE)
+    
+    ppi_network <- string_db$get_interactions(mapped_genes$STRING_id)
+    
+    return(ppi_network)
+  }
+  
+  ppi_results <- find_ppi(gene_list)
+  
+  return(list(degs = significant_degs, go_results = go_results, ppi_results = ppi_results))
+}
+
+
+NETA_scRNAseq <- function(seurat_object, p_value_cutoff = 0.05) {
+  # Step 1: Quality Control on Seurat Object
+  seurat_object <- seurat_object %>%
+    AddMetaData(metadata = rownames(seurat_object@meta.data), col.name = "sample") %>%
+    separate(col = 'sample', into = c('Patient', 'Barcode', 'Tissue'), sep = '_') %>%
+    mutate(mitoPercent = PercentageFeatureSet(., pattern = '^MT-')) %>%
+    subset(subset = nCount_RNA > 800 & nFeature_RNA > 500 & mitoPercent < 10)
+  
+  # Step 2: Standard Workflow in Seurat for Batch Effect Detection
+  seurat_object <- seurat_object %>%
+    NormalizeData() %>%
+    FindVariableFeatures() %>%
+    ScaleData() %>%
+    RunPCA() %>%
+    FindNeighbors(dims = 1:20) %>%
+    FindClusters() %>%
+    RunUMAP(dims = 1:20)
+  
+  ElbowPlot(seurat_object)
+  
+  # Step 3: Find Differentially Expressed Genes (DEGs) per Cluster
+  cluster_markers <- FindAllMarkers(seurat_object, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+  top_markers <- cluster_markers %>% group_by(cluster) %>% slice_max(n = 2, order_by = avg_log2FC)
+  
+  # Step 4: Annotate Clusters with Clustermole
+  cluster_annotations <- clustermole(cluster_markers)
+  
+  # Step 5: Extract Gene List for GO and PPI Mapping
+  gene_list <- unique(cluster_markers$gene)
+  
+  # Step 6: Map DEGs to GO Terms and Create a GO Term Binary Matrix
+  map_genes_to_go <- function(gene_list) {
+    go_results <- gost(query = gene_list, organism = "hsapiens", sources = c("GO:BP", "GO:CC", "GO:MF"))
+    
+    if (is.null(go_results)) {
+      return(NULL)
+    }
+    
+    go_terms <- unique(go_results$result$term_name)
+    go_matrix <- sapply(go_terms, function(go_term) as.integer(go_results$result$term_name == go_term))
+    rownames(go_matrix) <- go_results$result$query
+    
+    return(list(go_mappings = go_results$result, go_matrix = go_matrix))
+  }
+  
+  go_results <- map_genes_to_go(gene_list)
+  
+  # Step 7: Find Protein-Protein Interactions (PPIs) Using STRINGdb
+  find_ppi <- function(gene_list) {
+    string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400, input_directory = "")
+    mapped_genes <- string_db$map(data.frame(gene_list), "gene_list", removeUnmappedRows = TRUE)
+    
+    if (is.null(mapped_genes) || nrow(mapped_genes) == 0) {
+      return(NULL)
+    }
+    
+    ppi_network <- string_db$get_interactions(mapped_genes$STRING_id)
+    return(ppi_network)
+  }
+  
+  ppi_results <- find_ppi(gene_list)
+  
+  # Step 8: Return Results
+  return(list(cluster_markers = cluster_markers, 
+              top_markers = top_markers, 
+              cluster_annotations = cluster_annotations, 
+              go_results = go_results, 
+              ppi_results = ppi_results))
+}
+

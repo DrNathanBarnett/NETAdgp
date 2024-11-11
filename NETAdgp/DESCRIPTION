@@ -1,0 +1,22 @@
+Package: NETAdgp
+Type: Package
+Title: NETAdgp
+Version: 0.7.0
+Authors@R: c(person("Nathan James", "Barnett", email = "nathan@netadiscovery.org", role = c("aut", "cre")))
+Maintainer: Nathan James Barnett <nathan@netadiscovery.org>
+Description: NETAdgp: A package that automates differential gene expression, pathway enrichment analysis, protein-protein interactions, and cell annotations.
+            This is a proprietary R package developed by NEURAL EPILEPTOTRANSCRIPTOMIC ADVANCEMENT. 
+             Please see the LICENSE file for detailed terms and conditions.
+License: file LICENSE
+Encoding: UTF-8
+LazyData: true
+Imports:
+    dplyr,
+    clustermole,
+    Seurat,
+    STRINGdb,
+    tidyr,
+    limma,
+    gprofiler2,
+    edgeR,
+
